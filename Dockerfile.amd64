@@ -1,4 +1,30 @@
-FROM ubuntu:24.04
+# ---------------------------------------------------------------------------
+# Stage "llvm": clang/lld 19.1.7 built from pinned upstream source (CMake).
+#
+# This stage is IDENTICAL in Dockerfile.amd64 and Dockerfile.arm64 (the
+# compiler runs on the x86_64 host and cross-compiles to both targets), so both
+# legs share one cached result. The workflow builds it once in its own job and
+# keeps it in the GitHub Actions cache; it is rebuilt only when this stage or
+# llvm/ (the pin in llvm/source.env, the build recipe) changes. The base is
+# pinned by digest for the same reason: a refreshed ubuntu:24.04 tag would
+# otherwise force a full LLVM rebuild.
+# ---------------------------------------------------------------------------
+FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac AS llvm
+
+# Host build tools for LLVM only; none of them reach the final image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl xz-utils build-essential binutils cmake \
+        ninja-build python3 zlib1g-dev libzstd-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY llvm/ /usr/src/nextbsd-llvm/
+RUN /usr/src/nextbsd-llvm/build-llvm.sh /usr/lib/llvm-19
+
+# ---------------------------------------------------------------------------
+# Final image. Always rebuilt from scratch (the workflow disables the cache for
+# this stage), so the baked /usr/src always matches FREEBSD_SHA.
+# ---------------------------------------------------------------------------
+FROM ubuntu:24.04 AS toolchain
 
 ARG TARGET=amd64
 ARG TARGET_ARCH=amd64
@@ -9,7 +35,8 @@ ARG FREEBSD_SHA=
 # MAKEOBJDIRPREFIX must be in the ENV (the build refuses it as a make arg).
 # CROSS_BINDIR points make.py at an EXTERNAL Clang 19 cross toolchain so it does
 # NOT bootstrap its own LLVM (make.py requires an external toolchain on Linux).
-# FreeBSD 15.1's own compiler is Clang 19, so stock clang-19 builds every module
+# That toolchain is the source-built llvmorg-19.1.7 from the "llvm" stage, the
+# same revision as FreeBSD 15.1's own compiler, so it builds every module
 # (e.g. iwlwifi, which needs the Clang 19 builtin __builtin_popcountg). Both
 # vars are inherited by the downstream kernel/module jobs in this image.
 ENV MAKEOBJDIRPREFIX=/usr/obj
@@ -18,22 +45,44 @@ ENV CROSS_BINDIR=/usr/lib/llvm-19/bin
 # Host build deps a minimal ubuntu base lacks (the GitHub runner ships them):
 # build-essential (host gcc/cc to bootstrap), bc/flex/bison (bmake tests,
 # kbdcontrol), time (host-symlinks), libssl-dev (certctl), libarchive-dev,
-# bmake, git/python3 (make.py), gh/curl (dispatch). Clang 19 / lld 19 come from
-# apt.llvm.org (Ubuntu 24.04 ships only clang-18) and are the cross toolchain.
+# bmake, git/python3 (make.py), gh/curl (dispatch). The cross toolchain is NOT
+# from apt: it is copied in from the "llvm" stage (COPY --from=llvm, next).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl gnupg \
-    && curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
-        | gpg --dearmor -o /usr/share/keyrings/llvm.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-19 main" \
-        > /etc/apt/sources.list.d/llvm.list \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         | tee /usr/share/keyrings/githubcli-archive-keyring.gpg > /dev/null \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
         > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update && apt-get install -y --no-install-recommends \
         build-essential bc time flex bison bmake ccache \
-        libarchive-dev libssl-dev clang-19 lld-19 git python3 gh \
+        libarchive-dev libssl-dev git python3 gh \
     && rm -rf /var/lib/apt/lists/*
+
+# clang/lld/llvm binutils 19.1.7 at the path the apt packages used, so
+# CROSS_BINDIR and every downstream tool path stay the same.
+COPY --from=llvm /usr/lib/llvm-19 /usr/lib/llvm-19
+
+# Compatibility with the former apt.llvm.org layout, so nothing downstream has
+# to change:
+# - /usr/bin/<tool>-19 names (clang-19, ld.lld-19, llvm-ar-19, ...).
+# - Placeholder dpkg entries for clang-19, lld-19 and llvm-19 at 1:19.1.7, so a
+#   downstream "apt-get install llvm-19" (nextbsd-contrib does one) is a no-op
+#   instead of pulling Ubuntu's unpinned 19.1.1 over /usr/lib/llvm-19.
+RUN for f in /usr/lib/llvm-19/bin/*; do \
+         b="$(basename "$f")"; \
+         case "$b" in *-19) n="$b" ;; *) n="$b-19" ;; esac; \
+         ln -s "$f" "/usr/bin/$n"; \
+       done \
+    && for p in clang-19 lld-19 llvm-19; do \
+         d="$(mktemp -d)"; mkdir "$d/DEBIAN"; \
+         printf '%s\n' "Package: $p" "Version: 1:19.1.7-0nextbsd1" \
+           "Architecture: all" "Maintainer: NextBSD toolchain <root@localhost>" \
+           "Description: $p placeholder: provided by the NextBSD source-built" \
+           " llvmorg-19.1.7 toolchain in /usr/lib/llvm-19." > "$d/DEBIAN/control"; \
+         dpkg-deb --build "$d" "/tmp/$p.deb" >/dev/null && dpkg -i "/tmp/$p.deb" >/dev/null; \
+         rm -rf "$d" "/tmp/$p.deb"; \
+       done \
+    && /usr/lib/llvm-19/bin/clang --version
 
 # ccache cross wrapper: mirror the llvm-19 bindir but route clang/clang++ through
 # ccache (FreeBSD's WITH_CCACHE_BUILD does NOT wrap an external XCC). Downstream

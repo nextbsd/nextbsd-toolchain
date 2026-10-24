@@ -9,6 +9,7 @@ on:
     # are gated on github.ref_name == 'main', which is "<PR#>/merge" on a PR.
     paths:
       - 'Dockerfile.*'
+      - 'llvm/**'
       - '.github/workflows/build-toolchain.yml'
   schedule:
     - cron: '0 6 * * 1'  # weekly fallback
@@ -19,8 +20,39 @@ env:
   FREEBSD_BRANCH: releng/15.1
 
 jobs:
+  # clang/lld 19.1.7 from pinned upstream source (the "llvm" stage, identical in
+  # both Dockerfiles). A from-source LLVM build takes far longer than the rest
+  # of the image, so it runs ONCE here, for both arches (the compiler is an
+  # x86_64 host binary either way), and lands only in the GitHub Actions cache:
+  # nothing is pushed. The cache key is BuildKit's own content hash of the
+  # stage (pinned base digest + llvm/ files), so a run with an unchanged pin is
+  # a cache hit and finishes in a minute or two; changing llvm/source.env or
+  # the recipe rebuilds it. On a PR the cache is written to the PR's own scope,
+  # never to main's.
+  llvm:
+    name: clang/lld (llvmorg-19.1.7, cached)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the llvm stage into the cache
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.amd64
+          target: llvm
+          push: false
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=nextbsd-llvm
+          cache-to: type=gha,scope=nextbsd-llvm,mode=max
+
   build:
     runs-on: ubuntu-24.04
+    needs: llvm
     outputs:
       # #423: promoted so the notify job below can forward it -- steps.*.outputs
       # is not reachable across jobs.
@@ -92,9 +124,13 @@ jobs:
             FREEBSD_BRANCH=${{ env.FREEBSD_BRANCH }}
             FREEBSD_SHA=${{ github.event.client_payload.sha }}
           tags: ${{ steps.src.outputs.tags }}
-          # No layer cache: every image is built from scratch off the current
-          # FREEBSD_SHA source, so a stale layer can never pin an old base version.
-          no-cache: true
+          # Only the "llvm" stage (pinned clang/lld, built by the llvm job
+          # above) comes from the cache. The "toolchain" stage -- apt deps,
+          # /usr/src at FREEBSD_SHA, kernel-toolchain -- is never cached: every
+          # image is built from scratch off the current FREEBSD_SHA source, so
+          # a stale layer can never pin an old base version.
+          cache-from: type=gha,scope=nextbsd-llvm
+          no-cache-filters: toolchain
 
   # #423: the downstream dispatch used to fire from INSIDE the build matrix,
   # off the amd64 leg only -- the moment amd64 pushed, the downstream arm64
