@@ -1,6 +1,12 @@
-# nextbsd-kernel-toolchain
+# nextbsd-toolchain
 
-Cross-compilation toolchain containers for the NextBSD kernel pipeline.
+Cross-compilation toolchain containers for NextBSD's build pipeline (kernel, kexts, base and userland).
+
+> **Renamed** from `nextbsd-kernel-toolchain` (2026-10-24). The repo serves every NextBSD build, not only the kernel,
+> and will build the pinned LLVM 19.1.7 toolchain itself (nextbsd/nextbsd#561, E23).
+> **The container image keeps its old name for now:** `ghcr.io/nextbsd/nextbsd-kernel-toolchain`. Moving it to
+> `ghcr.io/nextbsd/nextbsd-toolchain` is a separate, staged change. Never create a new repo named
+> `nextbsd-kernel-toolchain`: that would break the redirect from the old name.
 
 Each image bakes a **shallow, full-tree** checkout of
 [`nextbsd/freebsd-src`](https://github.com/nextbsd/freebsd-src)
