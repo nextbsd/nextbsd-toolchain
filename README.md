@@ -17,6 +17,15 @@ no re-cloning, and the image itself (stored in GHCR) is the source artifact.
 | `amd64-fbsd-<sha>` | Source pinned to FreeBSD commit `<sha>` |
 | `amd64-fbsd-tip` | Built from branch tip (manual / scheduled, no SHA) |
 
+## Host build tools
+
+Besides the cross clang/lld, the image carries the host tools the NextBSD X
+stack, Mesa and GNUstep/Gershwin support repos build with (build-time only,
+never shipped): meson 1.12.1 (pinned upstream tarball, SHA-256 checked), ninja,
+CMake, **pkgconf** (never freedesktop's GPL `pkg-config`; the build fails if it
+appears), autoconf/automake/libtool, X.Org util-macros 1.20.2 (pinned tarball,
+SHA-256 checked) and Python's mako and yaml for Mesa.
+
 ## Triggers
 
 - `repository_dispatch: upstream-updated` — from the `freebsd-src` fork's daily

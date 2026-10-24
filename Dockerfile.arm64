@@ -50,6 +50,54 @@ RUN mkdir -p /opt/ccache-cross \
     && chmod +x /opt/ccache-cross/clang /opt/ccache-cross/clang++
 ENV CCACHE_CROSS_BINDIR=/opt/ccache-cross
 
+# ---------------------------------------------------------------------------
+# E23/E24 host build tools (nextbsd-toolchain#13). Build-time only, never
+# shipped: the X stack, Mesa and the GNUstep/Gershwin support repos cross-build
+# with meson, CMake and autotools from inside this image.
+#   - ninja, cmake, autoconf/automake/libtool, Mesa's python mako + yaml: the
+#     Ubuntu 24.04 packages (fixed per Ubuntu release).
+#   - pkgconf: the ISC pkgconf (E24 D1), never freedesktop's GPL pkg-config.
+#     Its /usr/bin/pkg-config name must belong to the pkgconf packages; the
+#     build fails if anything else provides it.
+#   - meson: pinned upstream release. Ubuntu's 1.3.2 is below Mesa 26.2.5's
+#     `meson_version >= 1.4.0` (XLibre 25.2.2 needs >= 0.61.0). Run from the
+#     verified source tarball; no pip.
+#   - util-macros: pinned upstream X.Org tarball (provides xorg-macros.m4 for
+#     autoreconf), installed under /usr so the stock aclocal finds it.
+# ---------------------------------------------------------------------------
+ARG MESON_VERSION=1.12.1
+ARG MESON_SHA256=ab0a6ca09f8ef70c564c8241fb5a23957886a0b53fb58412b5e07eaf07dba743
+ARG UTIL_MACROS_VERSION=1.20.2
+ARG UTIL_MACROS_SHA256=9ac269eba24f672d7d7b3574e4be5f333d13f04a7712303b1821b2a51ac82e8e
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ninja-build cmake pkgconf autoconf automake libtool \
+        python3-mako python3-yaml xz-utils \
+    && rm -rf /var/lib/apt/lists/* \
+    && case "$(dpkg -S "$(readlink -f /usr/bin/pkg-config)" /usr/bin/pkg-config)" in \
+         *pkg-config:*) echo "freedesktop pkg-config installed; pkgconf only" >&2; exit 1 ;; \
+       esac \
+    && cd /tmp \
+    && curl -fsSLo meson.tar.gz \
+        "https://github.com/mesonbuild/meson/releases/download/${MESON_VERSION}/meson-${MESON_VERSION}.tar.gz" \
+    && echo "${MESON_SHA256}  meson.tar.gz" | sha256sum -c - \
+    && mkdir -p /opt/meson \
+    && tar -xzf meson.tar.gz -C /opt/meson --strip-components=1 \
+    && printf '#!/bin/sh\nexec /usr/bin/python3 /opt/meson/meson.py "$@"\n' > /usr/local/bin/meson \
+    && chmod +x /usr/local/bin/meson \
+    && curl -fsSLo util-macros.tar.xz \
+        "https://xorg.freedesktop.org/releases/individual/util/util-macros-${UTIL_MACROS_VERSION}.tar.xz" \
+    && echo "${UTIL_MACROS_SHA256}  util-macros.tar.xz" | sha256sum -c - \
+    && tar -xJf util-macros.tar.xz \
+    && cd "util-macros-${UTIL_MACROS_VERSION}" \
+    && ./configure --prefix=/usr \
+    && make install \
+    && cd /tmp && rm -rf meson.tar.gz util-macros.tar.xz "util-macros-${UTIL_MACROS_VERSION}" \
+    && test "$(meson --version)" = "${MESON_VERSION}" \
+    && ninja --version && cmake --version && pkgconf --version && pkg-config --version \
+    && autoconf --version && automake --version && libtoolize --version \
+    && test -f /usr/share/aclocal/xorg-macros.m4 \
+    && python3 -c 'import mako, yaml'
+
 # Shallow (--depth 1) but FULL-TREE clone from the NextBSD fork.
 # Deliberately NOT sparse: kernel-toolchain/buildkernel need share/mk,
 # tools/build, usr.bin/, gnu/, lib/ ... a sys-only tree fails the build.
