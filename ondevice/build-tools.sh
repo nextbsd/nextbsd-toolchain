@@ -80,11 +80,11 @@ fresh_build() {
 
 # A target executable must be a FreeBSD ELF for the right machine.
 elf_check() {
-    "$READELF" -h "$1" | grep -q 'OS/ABI:.*FreeBSD' || fail "$1 is not a FreeBSD ELF"
+    "$READELF" -h "$1" | grep 'OS/ABI:.*FreeBSD' >/dev/null || fail "$1 is not a FreeBSD ELF"
     note "$(basename "$1"): $("$READELF" -h "$1" | sed -n 's/^ *Machine: *//p')"
 }
 needed_check() {
-    "$READELF" -d "$1" | grep -q "NEEDED.*$2" || fail "$1 missing DT_NEEDED $2"
+    "$READELF" -d "$1" | grep "NEEDED.*$2" >/dev/null || fail "$1 missing DT_NEEDED $2"
     note "DT_NEEDED ok: $(basename "$1") -> $2"
 }
 
@@ -161,7 +161,7 @@ build_pkgconf() {
     done
     ln -sfn pkgconf.1 "$DESTDIR/usr/share/man/man1/pkg-config.1"
     elf_check "$DESTDIR/usr/bin/pkgconf"
-    strings -a "$DESTDIR/usr/bin/pkgconf" | grep -qF "$pcpath" \
+    strings -a "$DESTDIR/usr/bin/pkgconf" | grep -F "$pcpath" >/dev/null \
         || fail "pkgconf's default search path is not $pcpath"
     [ -e "$DESTDIR/usr/bin/bomtool" ] && fail "bomtool was staged"
     return 0
@@ -286,7 +286,7 @@ EOF
     if grep -rlE '^#!.*(perl|python|wish)' "$x" "$DESTDIR/usr/bin" 2>/dev/null; then
         fail "a Perl/Python/Tcl script was staged"
     fi
-    strings -a "$g" | grep -qF /usr/share/git-core/gitconfig \
+    strings -a "$g" | grep -F /usr/share/git-core/gitconfig >/dev/null \
         || fail "git's system config is not /usr/share/git-core/gitconfig"
     note "git-core: $(find "$x" -type f | wc -l) files, $(find "$x" -type l | wc -l) links"
     return 0
