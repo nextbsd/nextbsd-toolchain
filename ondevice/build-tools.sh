@@ -161,7 +161,7 @@ build_pkgconf() {
     done
     ln -sfn pkgconf.1 "$DESTDIR/usr/share/man/man1/pkg-config.1"
     elf_check "$DESTDIR/usr/bin/pkgconf"
-    strings "$DESTDIR/usr/bin/pkgconf" | grep -qx "$pcpath" \
+    strings -a "$DESTDIR/usr/bin/pkgconf" | grep -qF "$pcpath" \
         || fail "pkgconf's default search path is not $pcpath"
     [ -e "$DESTDIR/usr/bin/bomtool" ] && fail "bomtool was staged"
     return 0
@@ -286,7 +286,7 @@ EOF
     if grep -rlE '^#!.*(perl|python|wish)' "$x" "$DESTDIR/usr/bin" 2>/dev/null; then
         fail "a Perl/Python/Tcl script was staged"
     fi
-    strings "$g" | grep -qx /usr/share/git-core/gitconfig \
+    strings -a "$g" | grep -qF /usr/share/git-core/gitconfig \
         || fail "git's system config is not /usr/share/git-core/gitconfig"
     note "git-core: $(find "$x" -type f | wc -l) files, $(find "$x" -type l | wc -l) links"
     return 0
