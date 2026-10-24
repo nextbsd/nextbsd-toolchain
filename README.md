@@ -30,7 +30,14 @@ stack, Mesa and GNUstep/Gershwin support repos build with (build-time only,
 never shipped): meson 1.12.1 (pinned upstream tarball, SHA-256 checked), ninja,
 CMake, **pkgconf** (never freedesktop's GPL `pkg-config`; the build fails if it
 appears), autoconf/automake/libtool, X.Org util-macros 1.20.2 (pinned tarball,
-SHA-256 checked) and Python's mako and yaml for Mesa.
+SHA-256 checked) and Python's mako, yaml and packaging for Mesa.
+
+## Host libraries for Mesa's `mesa_clc`
+
+`/opt/mesa-clc` holds what Mesa's Intel drivers (iris, crocus) need on the build host to compile their internal
+shaders with `mesa_clc`: LLVM/clang 19.1.7 as shared libraries (same `llvmorg-19.1.7` pin), SPIRV-LLVM-Translator
+v19.1.23 and SPIRV-Tools v2026.4, with `llvm-config` and `.pc` files. Build-time only, never shipped. See
+[`mesa-clc/README.md`](mesa-clc/README.md) for the pins and how nextbsd-mesa uses them.
 
 ## Static LLVM for Mesa
 

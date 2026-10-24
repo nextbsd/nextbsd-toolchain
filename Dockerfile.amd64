@@ -21,6 +21,39 @@ COPY llvm/ /usr/src/nextbsd-llvm/
 RUN /usr/src/nextbsd-llvm/build-llvm.sh /usr/lib/llvm-19
 
 # ---------------------------------------------------------------------------
+# Stages "mesa-clc-llvm" and "mesa-clc": host libraries for Mesa's mesa_clc
+# (nextbsd-toolchain#11, E23 plan step 1, D7). Build-host only, never shipped.
+#
+# iris and crocus compile Intel's internal OpenCL C shaders to SPIR-V at build
+# time with mesa_clc, a program that runs on the x86_64 build host and links
+# clang, LLVM, SPIRV-LLVM-Translator and SPIRV-Tools. These stages build them
+# for the host, into /opt/mesa-clc: LLVM/clang 19.1.7 as shared libraries (the
+# same llvm/source.env pin as the cross clang above), SPIRV-LLVM-Translator
+# v19.1.x and SPIRV-Tools + SPIRV-Headers (mesa-clc/sources.env). See
+# mesa-clc/README.md.
+#
+# Like "llvm", both stages are IDENTICAL in Dockerfile.amd64 and
+# Dockerfile.arm64 and are kept in the GitHub Actions cache by their own job.
+# They are separate from "llvm", so they never change its cache key; LLVM is
+# its own stage so a SPIR-V-only change does not rebuild it.
+# ---------------------------------------------------------------------------
+FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac AS mesa-clc-llvm
+
+# Same host build tools (and layer) as the "llvm" stage; none reach the image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl xz-utils build-essential binutils cmake \
+        ninja-build python3 zlib1g-dev libzstd-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY llvm/source.env llvm/fetch-llvm.sh /usr/src/nextbsd/llvm/
+COPY mesa-clc/build-llvm.sh /usr/src/nextbsd/mesa-clc/
+RUN /usr/src/nextbsd/mesa-clc/build-llvm.sh /opt/mesa-clc
+
+FROM mesa-clc-llvm AS mesa-clc
+COPY mesa-clc/ /usr/src/nextbsd/mesa-clc/
+RUN /usr/src/nextbsd/mesa-clc/build-spirv.sh /opt/mesa-clc
+
+# ---------------------------------------------------------------------------
 # Final image. Always rebuilt from scratch (the workflow disables the cache for
 # this stage), so the baked /usr/src always matches FREEBSD_SHA.
 # ---------------------------------------------------------------------------
@@ -92,7 +125,8 @@ ENV CCACHE_CROSS_BINDIR=/opt/ccache-cross
 # shipped: the X stack, Mesa and the GNUstep/Gershwin support repos cross-build
 # with meson, CMake and autotools from inside this image.
 #   - ninja, cmake, autoconf/automake/libtool, Mesa's python mako + yaml: the
-#     Ubuntu 24.04 packages (fixed per Ubuntu release).
+#     Ubuntu 24.04 packages (fixed per Ubuntu release). Mesa's meson also
+#     needs python's packaging (Ubuntu's Python 3.12 has no distutils).
 #   - pkgconf: the ISC pkgconf (E24 D1), never freedesktop's GPL pkg-config.
 #     Its /usr/bin/pkg-config name must belong to the pkgconf packages; the
 #     build fails if anything else provides it.
@@ -108,7 +142,7 @@ ARG UTIL_MACROS_VERSION=1.20.2
 ARG UTIL_MACROS_SHA256=9ac269eba24f672d7d7b3574e4be5f333d13f04a7712303b1821b2a51ac82e8e
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ninja-build cmake pkgconf autoconf automake libtool \
-        python3-mako python3-yaml xz-utils \
+        python3-mako python3-packaging python3-yaml xz-utils \
     && rm -rf /var/lib/apt/lists/* \
     && case "$(dpkg -S "$(readlink -f /usr/bin/pkg-config)" /usr/bin/pkg-config)" in \
          *pkg-config:*) echo "freedesktop pkg-config installed; pkgconf only" >&2; exit 1 ;; \
@@ -133,7 +167,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ninja --version && cmake --version && pkgconf --version && pkg-config --version \
     && autoconf --version && automake --version && libtoolize --version \
     && test -f /usr/share/aclocal/xorg-macros.m4 \
-    && python3 -c 'import mako, yaml'
+    && python3 -c 'import mako, packaging, yaml'
+
+# ---------------------------------------------------------------------------
+# E23 host libraries for Mesa's mesa_clc (nextbsd-toolchain#11), from the
+# "mesa-clc" stage. Build-time only, never shipped: nextbsd-mesa builds
+# mesa_clc and vtn_bindgen2 natively against /opt/mesa-clc (llvm-config,
+# libLLVM/libclang-cpp 19.1.7, LLVMSPIRVLib 19.1.x, SPIRV-Tools; see
+# mesa-clc/README.md), then cross-builds iris/crocus with -Dmesa-clc=system.
+# The loader path entry lets the installed mesa_clc find libLLVM and
+# libclang-cpp without an rpath.
+# ---------------------------------------------------------------------------
+COPY --from=mesa-clc /opt/mesa-clc /opt/mesa-clc
+RUN echo /opt/mesa-clc/lib > /etc/ld.so.conf.d/mesa-clc.conf \
+    && ldconfig \
+    && test "$(/opt/mesa-clc/bin/llvm-config --version)" = 19.1.7 \
+    && test "$(/opt/mesa-clc/bin/llvm-config --shared-mode)" = shared \
+    && PKG_CONFIG_PATH=/opt/mesa-clc/lib/pkgconfig pkgconf --modversion LLVMSPIRVLib SPIRV-Tools \
+    && PKG_CONFIG_PATH=/opt/mesa-clc/lib/pkgconfig pkgconf --atleast-version=19.1 --max-version=19.1.99 LLVMSPIRVLib \
+    && PKG_CONFIG_PATH=/opt/mesa-clc/lib/pkgconfig pkgconf --atleast-version=2024.1 SPIRV-Tools \
+    && cat /opt/mesa-clc/BUILD-INFO
 
 # Shallow (--depth 1) but FULL-TREE clone from the NextBSD fork.
 # Deliberately NOT sparse: kernel-toolchain/buildkernel need share/mk,

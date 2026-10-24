@@ -10,6 +10,7 @@ on:
     paths:
       - 'Dockerfile.*'
       - 'llvm/**'
+      - 'mesa-clc/**'
       - '.github/workflows/build-toolchain.yml'
   schedule:
     - cron: '0 6 * * 1'  # weekly fallback
@@ -50,9 +51,50 @@ jobs:
           cache-from: type=gha,scope=nextbsd-llvm
           cache-to: type=gha,scope=nextbsd-llvm,mode=max
 
+  # Host libraries for Mesa's mesa_clc (nextbsd-toolchain#11): LLVM/clang
+  # 19.1.7 shared, SPIRV-LLVM-Translator, SPIRV-Tools (the "mesa-clc-llvm" and
+  # "mesa-clc" stages, identical in both Dockerfiles; see mesa-clc/README.md).
+  # Like the llvm job: built once, kept only in the GitHub Actions cache under
+  # its own scope (so the llvm cache is untouched), nothing pushed; a PR's
+  # cache stays in the PR's scope. The LLVM stage is built and cached first,
+  # so a failure or change in the SPIR-V half does not rebuild LLVM.
+  mesa-clc:
+    name: mesa_clc host libraries (LLVM 19.1.7 + SPIR-V, cached)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the mesa-clc-llvm stage into the cache
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.amd64
+          target: mesa-clc-llvm
+          push: false
+          outputs: type=cacheonly
+          cache-from: |
+            type=gha,scope=nextbsd-mesa-clc
+            type=gha,scope=nextbsd-llvm
+          cache-to: type=gha,scope=nextbsd-mesa-clc,mode=max
+
+      - name: Build the mesa-clc stage into the cache
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.amd64
+          target: mesa-clc
+          push: false
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=nextbsd-mesa-clc
+          cache-to: type=gha,scope=nextbsd-mesa-clc,mode=max
+
   build:
     runs-on: ubuntu-24.04
-    needs: llvm
+    needs: [llvm, mesa-clc]
     outputs:
       # #423: promoted so the notify job below can forward it -- steps.*.outputs
       # is not reachable across jobs.
@@ -125,11 +167,14 @@ jobs:
             FREEBSD_SHA=${{ github.event.client_payload.sha }}
           tags: ${{ steps.src.outputs.tags }}
           # Only the "llvm" stage (pinned clang/lld, built by the llvm job
-          # above) comes from the cache. The "toolchain" stage -- apt deps,
+          # above) and the "mesa-clc" stages (the mesa-clc job) come from the
+          # cache. The "toolchain" stage -- apt deps,
           # /usr/src at FREEBSD_SHA, kernel-toolchain -- is never cached: every
           # image is built from scratch off the current FREEBSD_SHA source, so
           # a stale layer can never pin an old base version.
-          cache-from: type=gha,scope=nextbsd-llvm
+          cache-from: |
+            type=gha,scope=nextbsd-llvm
+            type=gha,scope=nextbsd-mesa-clc
           no-cache-filters: toolchain
 
   # #423: the downstream dispatch used to fire from INSIDE the build matrix,
