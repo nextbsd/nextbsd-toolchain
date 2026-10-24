@@ -1,0 +1,212 @@
+name: Build NextBSD-toolchain (on-machine clang, gmake, pkgconf, git)
+
+# The contents of the NextBSD-toolchain package (nextbsd-toolchain#16, E24 D9
+# and D11): tools that run ON NextBSD, cross-built for amd64 and arm64 on the
+# x86_64 runner inside the per-arch toolchain image, against compat's
+# `continuous` base (plus nextbsd-userland's `continuous` tree for libcurl) as
+# the sysroot, the way nextbsd-contrib builds. See ondevice/README.md.
+#
+# Separate from build-toolchain.yml: nothing here changes the toolchain image,
+# and nothing here dispatches anything. A merge to main (or a manual run on
+# main) refreshes this repo's `continuous` release with
+# nextbsd-toolchain-<arch>.tar.gz; packaging it is nextbsd-pkg's job, run by
+# hand (nextbsd-pkg#27). PRs build only.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ondevice/**'
+      - 'llvm/source.env'
+      - 'llvm/fetch-llvm.sh'
+      - '.github/workflows/build-toolchain-pkg.yml'
+  pull_request:
+    paths:
+      - 'ondevice/**'
+      - 'llvm/source.env'
+      - 'llvm/fetch-llvm.sh'
+      - '.github/workflows/build-toolchain-pkg.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: toolchain-pkg-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # clang/lld 19.1.7 built to run on NextBSD. The long job (about an hour per
+  # arch), so its staged tree is kept in the Actions cache, keyed on the LLVM
+  # pin and the recipe; a run with neither changed restores it in a minute.
+  # The binaries link only base's libc, libc++, libthr, libz and libexecinfo,
+  # whose ABI is fixed within 15.1, so a newer base does not invalidate them.
+  # A PR's cache is written to the PR's own scope, never to main's.
+  clang:
+    name: clang/lld 19.1.7 for NextBSD (${{ matrix.arch }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, target_arch: amd64 }
+          - { arch: arm64, target_arch: aarch64 }
+    container:
+      image: ghcr.io/nextbsd/nextbsd-kernel-toolchain:${{ matrix.arch }}-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore staged clang/lld
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: clang-${{ matrix.arch }}.tar
+          key: ondevice-clang-${{ matrix.arch }}-${{ hashFiles('llvm/source.env', 'llvm/fetch-llvm.sh', 'ondevice/build-clang.sh') }}
+
+      - name: Stage sysroot from compat continuous
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/sysroot"
+          gh release download continuous --repo nextbsd/nextbsd-freebsd-compat \
+            --pattern "nextbsd-base-${{ matrix.arch }}.tar.gz" --output /tmp/base.tar.gz --clobber
+          tar -C "$GITHUB_WORKSPACE/sysroot" -xzf /tmp/base.tar.gz
+          rm -f /tmp/base.tar.gz
+
+      - name: Build clang/lld
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          T: ${{ matrix.arch }}
+          TA: ${{ matrix.target_arch }}
+          SYSROOT: ${{ github.workspace }}/sysroot
+          DESTDIR: ${{ github.workspace }}/clang-stage
+        run: |
+          bash ./ondevice/build-clang.sh
+          tar -C "$DESTDIR" -cf "clang-${{ matrix.arch }}.tar" .
+          rm -rf "$DESTDIR" "$SYSROOT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clang-${{ matrix.arch }}
+          path: clang-${{ matrix.arch }}.tar
+          retention-days: 3
+
+  # gmake, pkgconf and Apple's Git: a few minutes per arch.
+  tools:
+    name: gmake, pkgconf, git (${{ matrix.arch }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, target_arch: amd64 }
+          - { arch: arm64, target_arch: aarch64 }
+    container:
+      image: ghcr.io/nextbsd/nextbsd-kernel-toolchain:${{ matrix.arch }}-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Base, with nextbsd-userland's tree over it for libcurl (Apple's curl,
+      # which Git's https transport links).
+      - name: Stage sysroot from compat and userland continuous
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/sysroot"
+          gh release download continuous --repo nextbsd/nextbsd-freebsd-compat \
+            --pattern "nextbsd-base-${{ matrix.arch }}.tar.gz" --output /tmp/base.tar.gz --clobber
+          gh release download continuous --repo nextbsd/nextbsd-userland \
+            --pattern "nextbsd-userland-${{ matrix.arch }}.tar.gz" --output /tmp/userland.tar.gz --clobber
+          tar -C "$GITHUB_WORKSPACE/sysroot" -xzf /tmp/base.tar.gz
+          tar -C "$GITHUB_WORKSPACE/sysroot" -xzf /tmp/userland.tar.gz
+          rm -f /tmp/base.tar.gz /tmp/userland.tar.gz
+          test -e "$GITHUB_WORKSPACE/sysroot/usr/lib/libcurl.so"
+
+      - name: Build gmake, pkgconf, git
+        env:
+          T: ${{ matrix.arch }}
+          TA: ${{ matrix.target_arch }}
+          SYSROOT: ${{ github.workspace }}/sysroot
+          DESTDIR: ${{ github.workspace }}/tools-stage
+        run: |
+          bash ./ondevice/build-tools.sh
+          tar -C "$DESTDIR" -cf "tools-${{ matrix.arch }}.tar" .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tools-${{ matrix.arch }}
+          path: tools-${{ matrix.arch }}.tar
+          retention-days: 3
+
+  # One tree rooted at /, owned by root, for nextbsd-pkg#27 to package as
+  # NextBSD-toolchain.
+  package:
+    name: NextBSD-toolchain tree (${{ matrix.arch }})
+    needs: [clang, tools]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-${{ matrix.arch }}'
+          path: parts
+          merge-multiple: true
+
+      - name: Assemble nextbsd-toolchain-${{ matrix.arch }}.tar.gz
+        run: |
+          set -eu
+          mkdir stage
+          tar -C stage -xf "parts/clang-${{ matrix.arch }}.tar"
+          # The two halves must not overlap.
+          dup=$(comm -12 <(tar -tf "parts/clang-${{ matrix.arch }}.tar" | grep -v '/$' | sort) \
+                         <(tar -tf "parts/tools-${{ matrix.arch }}.tar" | grep -v '/$' | sort))
+          [ -z "$dup" ] || { echo "clang and tools both stage: $dup" >&2; exit 1; }
+          tar -C stage -xf "parts/tools-${{ matrix.arch }}.tar"
+          out="nextbsd-toolchain-${{ matrix.arch }}.tar.gz"
+          tar -C stage --owner=0 --group=0 --numeric-owner -czf "$out" .
+          {
+            echo "### NextBSD-toolchain (${{ matrix.arch }})"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Installed size | $(du -sh --apparent-size stage | cut -f1) |"
+            echo "| Tarball | $(du -h --apparent-size "$out" | cut -f1) |"
+            echo "| Files / links | $(find stage -type f | wc -l) / $(find stage -type l | wc -l) |"
+            echo "| clang + lld + binutils | $(du -sh --apparent-size stage/usr/bin | cut -f1) in /usr/bin |"
+            echo "| git (bin + libexec + share) | $(du -csh --apparent-size stage/usr/bin/git stage/usr/libexec/git-core stage/usr/share/git-core | tail -1 | cut -f1) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$GITHUB_STEP_SUMMARY"
+          tar -tzvf "$out" | grep -v '/$' | grep -v 'usr/share/man/' | grep -v 'usr/lib/clang/'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nextbsd-toolchain-${{ matrix.arch }}
+          path: nextbsd-toolchain-${{ matrix.arch }}.tar.gz
+
+  publish:
+    needs: package
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: 'nextbsd-toolchain-*'
+          path: out
+          merge-multiple: true
+      - name: Publish to the continuous release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: continuous
+          name: Continuous NextBSD-toolchain build
+          prerelease: true
+          fail_on_unmatched_files: true
+          files: out/nextbsd-toolchain-*.tar.gz
+      # That is where this stops: no dispatch. The package repository is built
+      # by hand (nextbsd-pkg#27).

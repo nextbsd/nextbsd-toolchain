@@ -1,0 +1,6 @@
+# System Git configuration shipped with NextBSD-toolchain, as Apple ships one
+# in the Command Line Tools (share/git-core/gitconfig). Apple's sets the macOS
+# Keychain credential helper (osxkeychain), which does not exist on NextBSD, so
+# only its other setting is kept.
+[init]
+	defaultBranch = main
