@@ -65,22 +65,10 @@ COPY --from=llvm /usr/lib/llvm-19 /usr/lib/llvm-19
 # Compatibility with the former apt.llvm.org layout, so nothing downstream has
 # to change:
 # - /usr/bin/<tool>-19 names (clang-19, ld.lld-19, llvm-ar-19, ...).
-# - Placeholder dpkg entries for clang-19, lld-19 and llvm-19 at 1:19.1.7, so a
-#   downstream "apt-get install llvm-19" (nextbsd-contrib does one) is a no-op
-#   instead of pulling Ubuntu's unpinned 19.1.1 over /usr/lib/llvm-19.
 RUN for f in /usr/lib/llvm-19/bin/*; do \
          b="$(basename "$f")"; \
          case "$b" in *-19) n="$b" ;; *) n="$b-19" ;; esac; \
          ln -s "$f" "/usr/bin/$n"; \
-       done \
-    && for p in clang-19 lld-19 llvm-19; do \
-         d="$(mktemp -d)"; mkdir "$d/DEBIAN"; \
-         printf '%s\n' "Package: $p" "Version: 1:19.1.7-0nextbsd1" \
-           "Architecture: all" "Maintainer: NextBSD toolchain <root@localhost>" \
-           "Description: $p placeholder: provided by the NextBSD source-built" \
-           " llvmorg-19.1.7 toolchain in /usr/lib/llvm-19." > "$d/DEBIAN/control"; \
-         dpkg-deb --build "$d" "/tmp/$p.deb" >/dev/null && dpkg -i "/tmp/$p.deb" >/dev/null; \
-         rm -rf "$d" "/tmp/$p.deb"; \
        done \
     && /usr/lib/llvm-19/bin/clang --version
 
