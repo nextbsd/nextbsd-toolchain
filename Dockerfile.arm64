@@ -170,6 +170,42 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && python3 -c 'import mako, packaging, yaml'
 
 # ---------------------------------------------------------------------------
+# E24 host build tools built from pinned upstream source (nextbsd-toolchain#23,
+# #25). Build-time only, never shipped. Built with the host cc into /usr/local.
+#   - NASM: libjpeg-turbo's x86-64 SIMD and FFmpeg's x86-64 assembly in
+#     nextbsd-gnustep-support. Upstream nasm.us release tarball.
+#   - gperf: fontconfig's object hash in nextbsd-xlibs. gperf is GPL-3.0: it
+#     runs only on the build host and is never shipped in NextBSD. Upstream
+#     ftp.gnu.org tarball.
+# ---------------------------------------------------------------------------
+ARG NASM_VERSION=3.02
+ARG NASM_SHA256=87336eba53b4acfe917424ab5d500d2b0054d9f5148d35c2273ccf2cfb712f0d
+ARG GPERF_VERSION=3.3
+ARG GPERF_SHA256=fd87e0aba7e43ae054837afd6cd4db03a3f2693deb3619085e6ed9d8d9604ad8
+RUN cd /tmp \
+    && curl -fsSLo nasm.tar.xz \
+        "https://www.nasm.us/pub/nasm/releasebuilds/${NASM_VERSION}/nasm-${NASM_VERSION}.tar.xz" \
+    && echo "${NASM_SHA256}  nasm.tar.xz" | sha256sum -c - \
+    && tar -xJf nasm.tar.xz \
+    && cd "nasm-${NASM_VERSION}" \
+    && ./configure --prefix=/usr/local \
+    && make -j"$(nproc)" nasm ndisasm \
+    && install -m 0755 nasm ndisasm /usr/local/bin/ \
+    && cd /tmp \
+    && curl -fsSLo gperf.tar.gz \
+        "https://ftp.gnu.org/gnu/gperf/gperf-${GPERF_VERSION}.tar.gz" \
+    && echo "${GPERF_SHA256}  gperf.tar.gz" | sha256sum -c - \
+    && tar -xzf gperf.tar.gz \
+    && cd "gperf-${GPERF_VERSION}" \
+    && ./configure --prefix=/usr/local \
+    && make -j"$(nproc)" \
+    && make install \
+    && cd /tmp && rm -rf nasm.tar.xz "nasm-${NASM_VERSION}" gperf.tar.gz "gperf-${GPERF_VERSION}" \
+    && nasm -v | grep -q "^NASM version ${NASM_VERSION} " \
+    && test "$(gperf --version | head -1)" = "GNU gperf ${GPERF_VERSION}" \
+    && nasm -v && gperf --version | head -1
+
+# ---------------------------------------------------------------------------
 # E23 host libraries for Mesa's mesa_clc (nextbsd-toolchain#11), from the
 # "mesa-clc" stage. Build-time only, never shipped: nextbsd-mesa builds
 # mesa_clc and vtn_bindgen2 natively against /opt/mesa-clc (llvm-config,

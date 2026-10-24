@@ -30,7 +30,10 @@ stack, Mesa and GNUstep/Gershwin support repos build with (build-time only,
 never shipped): meson 1.12.1 (pinned upstream tarball, SHA-256 checked), ninja,
 CMake, **pkgconf** (never freedesktop's GPL `pkg-config`; the build fails if it
 appears), autoconf/automake/libtool, X.Org util-macros 1.20.2 (pinned tarball,
-SHA-256 checked) and Python's mako, yaml and packaging for Mesa.
+SHA-256 checked), Python's mako, yaml and packaging for Mesa, and, built from
+pinned upstream tarballs (SHA-256 checked) into `/usr/local`, NASM 3.02 (x86-64
+SIMD/assembly in the GNUstep support libraries) and gperf 3.3 (fontconfig; GPL-3.0,
+build host only).
 
 ## Host libraries for Mesa's `mesa_clc`
 
