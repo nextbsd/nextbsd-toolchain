@@ -1,0 +1,151 @@
+name: Build static LLVM for Mesa (llvmpipe)
+
+# The tiny static LLVM nextbsd-mesa links into libgallium (nextbsd-toolchain#12,
+# E23 plan step 2, D3), cross-built for amd64 and arm64 from the same pinned
+# llvmorg-19.1.7 as the image's clang/lld (llvm/source.env). See
+# llvm-static/README.md.
+#
+# It runs inside the per-arch toolchain image (its pinned clang/lld, CMake,
+# ninja) against compat's `continuous` base as the sysroot, the way
+# nextbsd-contrib builds. It is separate from build-toolchain.yml: nothing
+# here changes the image, and llvm-static/ is outside the image's `llvm` stage,
+# so the clang/lld cache is not invalidated.
+#
+# A merge to main publishes the per-arch tarballs to the release
+# `llvm-static-<LLVM_VERSION>` and stops there: nothing is dispatched, no
+# image is pushed, and PR runs only upload workflow artifacts.
+
+on:
+  pull_request:
+    paths:
+      - 'llvm/source.env'
+      - 'llvm/fetch-llvm.sh'
+      - 'llvm-static/**'
+      - '.github/workflows/build-llvm-static.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'llvm/source.env'
+      - 'llvm/fetch-llvm.sh'
+      - 'llvm-static/**'
+      - '.github/workflows/build-llvm-static.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: static LLVM (${{ matrix.arch }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    container:
+      image: ghcr.io/nextbsd/nextbsd-kernel-toolchain:${{ matrix.arch }}-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Name the output
+        id: meta
+        run: |
+          . llvm/source.env
+          echo "version=$LLVM_VERSION" >> "$GITHUB_OUTPUT"
+          echo "dir=llvm-$LLVM_MAJOR-nextbsd-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
+          echo "asset=nextbsd-llvm-static-$LLVM_VERSION-${{ matrix.arch }}.tar.xz" >> "$GITHUB_OUTPUT"
+
+      # Keyed on the pin and the recipe only, not on the sysroot: the archives
+      # depend on the base's headers and C++ runtime, which do not change in
+      # an ABI-visible way within releng/15.1. Bumping the pin or editing
+      # llvm-static/ rebuilds. On a PR the cache lives in the PR's own scope.
+      - name: Restore cached build
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: out
+          key: llvm-static-${{ matrix.arch }}-${{ hashFiles('llvm/source.env', 'llvm/fetch-llvm.sh', 'llvm-static/**') }}
+
+      - name: Stage sysroot from compat continuous
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/sysroot"
+          gh release download continuous \
+            --repo nextbsd/nextbsd-freebsd-compat \
+            --pattern "nextbsd-base-${{ matrix.arch }}.tar.gz" \
+            --output /tmp/base.tar.gz --clobber
+          tar -C "$GITHUB_WORKSPACE/sysroot" -xzf /tmp/base.tar.gz
+          rm -f /tmp/base.tar.gz
+          gh release view continuous --repo nextbsd/nextbsd-freebsd-compat \
+            --json assets --jq '.assets[] | select(.name == "nextbsd-base-${{ matrix.arch }}.tar.gz") | "\(.name) \(.updatedAt)"' \
+            > /tmp/sysroot-id
+
+      - name: Build static LLVM
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          T: ${{ matrix.arch }}
+          SYSROOT: ${{ github.workspace }}/sysroot
+        run: |
+          SYSROOT_ID="nextbsd-freebsd-compat continuous $(cat /tmp/sysroot-id)" \
+            ./llvm-static/build-llvm-static.sh "/tmp/${{ steps.meta.outputs.dir }}"
+          rm -rf "$GITHUB_WORKSPACE/sysroot"
+
+      - name: Pack
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p out
+          start=$(date +%s)
+          XZ_OPT="-T0 -9" tar -C /tmp -cJf "out/${{ steps.meta.outputs.asset }}" "${{ steps.meta.outputs.dir }}"
+          (cd out && sha256sum "${{ steps.meta.outputs.asset }}" > "${{ steps.meta.outputs.asset }}.sha256")
+          echo "packed in $(( $(date +%s) - start )) s"
+
+      - name: Show result
+        run: |
+          ls -l out
+          cat out/*.sha256
+          tar -xJOf "out/${{ steps.meta.outputs.asset }}" "${{ steps.meta.outputs.dir }}/BUILD-INFO"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nextbsd-llvm-static-${{ matrix.arch }}
+          path: out/
+          retention-days: 14
+
+  publish:
+    name: publish llvm-static release
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read the pin
+        id: meta
+        run: |
+          . llvm/source.env
+          echo "version=$LLVM_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$LLVM_TAG" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Gather artifacts
+        run: |
+          mkdir -p dist
+          find artifacts -name 'nextbsd-llvm-static-*' -type f -exec cp {} dist/ \;
+          ls -la dist/
+      # One release per LLVM version; a rebuild with the same pin replaces the
+      # assets. nextbsd-mesa downloads from this tag.
+      - name: Publish to the llvm-static release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: llvm-static-${{ steps.meta.outputs.version }}
+          name: Static LLVM ${{ steps.meta.outputs.version }} for Mesa (llvmpipe)
+          body: |
+            Static LLVM libraries, headers and a host llvm-config for nextbsd-mesa's llvmpipe,
+            cross-built for NextBSD amd64 and arm64 from upstream ${{ steps.meta.outputs.tag }}.
+            Build-time only: linked into Mesa, never shipped on its own. See llvm-static/README.md.
+          prerelease: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: dist/*

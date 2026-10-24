@@ -32,6 +32,12 @@ CMake, **pkgconf** (never freedesktop's GPL `pkg-config`; the build fails if it
 appears), autoconf/automake/libtool, X.Org util-macros 1.20.2 (pinned tarball,
 SHA-256 checked) and Python's mako and yaml for Mesa.
 
+## Static LLVM for Mesa
+
+`llvm-static/` builds the tiny static LLVM (native target, MCJIT/ORC) that nextbsd-mesa links into llvmpipe, for
+amd64 and arm64, from the same `llvmorg-19.1.7` pin. It is published as release `llvm-static-19.1.7`, not baked into
+the image. See [`llvm-static/README.md`](llvm-static/README.md).
+
 ## Triggers
 
 - `repository_dispatch: upstream-updated` — from the `freebsd-src` fork's daily
