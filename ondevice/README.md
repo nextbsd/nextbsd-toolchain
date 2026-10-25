@@ -90,13 +90,14 @@ script a native configure on NextBSD would write.
 - **Build:** perl-cross 1.6.5 replaces Perl's `Configure` with one that only compiles and links its probes, so it
   runs with the cross compiler; `perl/freebsd.hints` gives it the values it can't probe (perl-cross has no FreeBSD
   hints). It builds without threads, and only the extensions autoconf and automake load are built, statically
-  into the one binary: Fcntl, POSIX, Errno, File::Glob, re, Tie::Hash::NamedCapture, IO, PathTools (Cwd,
+  into the one binary: Fcntl, POSIX, Errno, File::Glob, Tie::Hash::NamedCapture, IO, PathTools (Cwd,
   File::Spec), Data::Dumper, Time::HiRes and Scalar-List-Utils (XS), plus constant, Exporter, Carp, XSLoader,
   base, parent, File::Find, File::Temp, File::Path, Getopt::Long and Text::ParseWords. Perl's own `lib/`
   (strict, warnings, Config, File::Basename, File::Copy, Class::Struct, ...) comes with it.
 - **Left out:** the Perl utilities (`perldoc`, `cpan`, `pod2*`, ...), pods and man pages, `CORE/` (headers and
   `libperl.a`, for building XS), `unicore/` (only `charnames` and `Unicode::UCD` read it; the regex engine's
-  tables are compiled in) and `.packlist`s. No CPAN, no ExtUtils::MakeMaker: you can't install modules into it.
+  tables are compiled in), the `re` pragma (its extension can't be linked statically, and autotools don't use
+  it) and `.packlist`s. No CPAN, no ExtUtils::MakeMaker: you can't install modules into it.
 - **Check:** the target perl can't run on the runner, so the build runs each autoconf and automake script
   (`--version`, which loads all of its modules) with the build host's Perl through the same `#!` path, and fails
   if any module it loads isn't in the shipped library.
