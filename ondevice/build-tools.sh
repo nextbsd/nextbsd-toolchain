@@ -365,8 +365,12 @@ host_autotools_paths() {
 # the wrappers or the runner's LLVM.
 no_build_paths() {
     local hits
-    hits=$(grep -rlaF -e "$BUILD" -e "$SYSROOT" -e "$CROSS_BINDIR" -e "${GITHUB_WORKSPACE:-/nonexistent-workspace}" "$1" || true)
-    [ -z "$hits" ] || fail "build paths in: $hits"
+    local -a pats=(-e "$BUILD" -e "$SYSROOT" -e "$CROSS_BINDIR" -e "${GITHUB_WORKSPACE:-/nonexistent-workspace}")
+    hits=$(grep -rlaF "${pats[@]}" "$1" || true)
+    if [ -n "$hits" ]; then
+        grep -raoF "${pats[@]}" $hits | sort | uniq -c | head -n 20 >&2
+        fail "build paths in: $hits"
+    fi
     local d="${1#"$COMP_ROOT"}"; d="${d#"$DESTDIR"}"
     note "no build paths under ${d:-/}"
 }
@@ -569,11 +573,13 @@ build_autoconf() {
     fetch autoconf "$AUTOCONF_URL" "$AUTOCONF_SHA256"
     host_autotools_paths
     fresh_build autoconf
+    # Built in its source tree: the frozen macro files (*.m4f) record where
+    # each macro was read from, relative to the source tree when it's ".".
     (
-        cd "$COMP_BUILD"
+        cd "$SRCDIR"
         CONFIG_SHELL=/bin/sh PERL="$AT_PERL" M4=/usr/bin/gm4 AWK=awk \
         SED=/usr/bin/sed GREP=/usr/bin/grep EGREP='/usr/bin/grep -E' \
-        /bin/sh "$SRCDIR/configure" \
+        /bin/sh ./configure \
             --prefix=/usr --mandir=/usr/share/man --infodir=/usr/share/info
         make $JOBS
         make install DESTDIR="$COMP_ROOT"
