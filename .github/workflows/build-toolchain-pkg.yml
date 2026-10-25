@@ -1,7 +1,7 @@
-name: Build NextBSD-toolchain (on-machine clang, gmake, pkgconf, git)
+name: Build NextBSD-toolchain (on-machine clang, gmake, pkgconf, git, cmake, autotools)
 
-# The contents of the NextBSD-toolchain package (nextbsd-toolchain#16, E24 D9
-# and D11): tools that run ON NextBSD, cross-built for amd64 and arm64 on the
+# The contents of the NextBSD-toolchain package (nextbsd-toolchain#16 and #27,
+# E24 D9 and D11): tools that run ON NextBSD, cross-built for amd64 and arm64 on the
 # x86_64 runner inside the per-arch toolchain image, against compat's
 # `continuous` base (plus nextbsd-userland's `continuous` tree for libcurl) as
 # the sysroot, the way nextbsd-contrib builds. See ondevice/README.md.
@@ -93,23 +93,30 @@ jobs:
           path: clang-${{ matrix.arch }}.tar
           retention-days: 3
 
-  # gmake, pkgconf and Apple's Git: a few minutes per arch.
+  # The rest, in three sets per arch run side by side: gmake, pkgconf and
+  # Apple's Git (a few minutes); GNU m4, the private Perl, autoconf, automake
+  # and libtool (#27); cmake (#27, the longest of the three).
   tools:
-    name: gmake, pkgconf, git (${{ matrix.arch }})
+    name: ${{ matrix.label }} (${{ matrix.arch }})
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
+        arch: [amd64, arm64]
+        set: [core, autotools, cmake]
         include:
           - { arch: amd64, target_arch: amd64 }
           - { arch: arm64, target_arch: aarch64 }
+          - { set: core, components: 'gmake pkgconf git', label: 'gmake, pkgconf, git' }
+          - { set: autotools, components: 'm4 perl autoconf automake libtool', label: 'm4, perl, autoconf, automake, libtool' }
+          - { set: cmake, components: 'cmake', label: 'cmake' }
     container:
       image: ghcr.io/nextbsd/nextbsd-kernel-toolchain:${{ matrix.arch }}-latest
     steps:
       - uses: actions/checkout@v4
 
       # Base, with nextbsd-userland's tree over it for libcurl (Apple's curl,
-      # which Git's https transport links).
+      # which Git's https transport and cmake link).
       - name: Stage sysroot from compat and userland continuous
         env:
           GH_TOKEN: ${{ github.token }}
@@ -124,20 +131,20 @@ jobs:
           rm -f /tmp/base.tar.gz /tmp/userland.tar.gz
           test -e "$GITHUB_WORKSPACE/sysroot/usr/lib/libcurl.so"
 
-      - name: Build gmake, pkgconf, git
+      - name: Build ${{ matrix.label }}
         env:
           T: ${{ matrix.arch }}
           TA: ${{ matrix.target_arch }}
           SYSROOT: ${{ github.workspace }}/sysroot
           DESTDIR: ${{ github.workspace }}/tools-stage
         run: |
-          bash ./ondevice/build-tools.sh
-          tar -C "$DESTDIR" -cf "tools-${{ matrix.arch }}.tar" .
+          bash ./ondevice/build-tools.sh ${{ matrix.components }}
+          tar -C "$DESTDIR" -cf "tools-${{ matrix.set }}-${{ matrix.arch }}.tar" .
 
       - uses: actions/upload-artifact@v4
         with:
-          name: tools-${{ matrix.arch }}
-          path: tools-${{ matrix.arch }}.tar
+          name: tools-${{ matrix.set }}-${{ matrix.arch }}
+          path: tools-${{ matrix.set }}-${{ matrix.arch }}.tar
           retention-days: 3
 
   # One tree rooted at /, owned by root, for nextbsd-pkg#27 to package as
@@ -161,12 +168,11 @@ jobs:
         run: |
           set -eu
           mkdir stage
-          tar -C stage -xf "parts/clang-${{ matrix.arch }}.tar"
-          # The two halves must not overlap.
-          dup=$(comm -12 <(tar -tf "parts/clang-${{ matrix.arch }}.tar" | grep -v '/$' | sort) \
-                         <(tar -tf "parts/tools-${{ matrix.arch }}.tar" | grep -v '/$' | sort))
-          [ -z "$dup" ] || { echo "clang and tools both stage: $dup" >&2; exit 1; }
-          tar -C stage -xf "parts/tools-${{ matrix.arch }}.tar"
+          ls -l parts
+          # clang and the three tools sets must not overlap.
+          dup=$(for p in parts/*.tar; do tar -tf "$p" | grep -v '/$' | sort -u; done | sort | uniq -d)
+          [ -z "$dup" ] || { echo "more than one part stages: $dup" >&2; exit 1; }
+          for p in parts/*.tar; do tar -C stage -xf "$p"; done
           out="nextbsd-toolchain-${{ matrix.arch }}.tar.gz"
           tar -C stage --owner=0 --group=0 --numeric-owner -czf "$out" .
           {
@@ -179,9 +185,13 @@ jobs:
             echo "| Files / links | $(find stage -type f | wc -l) / $(find stage -type l | wc -l) |"
             echo "| clang + lld + binutils | $(du -sh --apparent-size stage/usr/bin | cut -f1) in /usr/bin |"
             echo "| git (bin + libexec + share) | $(du -csh --apparent-size stage/usr/bin/git stage/usr/libexec/git-core stage/usr/share/git-core | tail -1 | cut -f1) |"
+            echo "| cmake (bin + share/cmake-*) | $(du -csh --apparent-size stage/usr/bin/cmake stage/usr/bin/ctest stage/usr/bin/cpack stage/usr/share/cmake-* | tail -1 | cut -f1) |"
+            echo "| autotools' private Perl (/usr/libexec/autotools) | $(du -sh --apparent-size stage/usr/libexec/autotools | cut -f1) |"
+            echo "| m4, autoconf, automake, libtool (bin + share) | $(du -csh --apparent-size stage/usr/bin/gm4 stage/usr/share/autoconf stage/usr/share/automake-* stage/usr/share/aclocal-* stage/usr/share/libtool | tail -1 | cut -f1) |"
           } >> "$GITHUB_STEP_SUMMARY"
           cat "$GITHUB_STEP_SUMMARY"
-          tar -tzvf "$out" | grep -v '/$' | grep -v 'usr/share/man/' | grep -v 'usr/lib/clang/'
+          tar -tzvf "$out" | grep -v '/$' | grep -v 'usr/share/man/' | grep -v 'usr/lib/clang/' \
+            | grep -v 'usr/share/cmake-' | grep -v 'usr/libexec/autotools/lib/'
 
       - uses: actions/upload-artifact@v4
         with:
