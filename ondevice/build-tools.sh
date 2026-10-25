@@ -708,15 +708,17 @@ build_libtool() {
         -e "s|^build=.*|build=$CROSS_TRIPLE|" \
         -e "s|^build_os=.*|build_os=${CROSS_TRIPLE#*-*-}|" "$lt"
     # What the script now says about the toolchain, for the log.
-    grep -E '^(host|build|build_os|LTCC|CC|LD|NM|AR|RANLIB|STRIP|OBJDUMP|SHELL|SED|GREP|predep_objects|postdep_objects|postdeps|compiler_lib_search_path|sys_lib_search_path_spec|sys_lib_dlsearch_path_spec)=' "$lt" \
-        | sort -u | sed 's/^/    /'
+    grep -nE '^(# ### BEGIN LIBTOOL TAG CONFIG|(available_tags|host|build|build_os|LTCC|CC|LD|NM|AR|RANLIB|STRIP|OBJDUMP|SHELL|SED|GREP|predep_objects|postdep_objects|postdeps|compiler_lib_search_path|sys_lib_search_path_spec|sys_lib_dlsearch_path_spec)=)' "$lt" \
+        | sed 's/^/    /'
     # Only the configuration sections (ltmain's own code has case patterns for
     # every OS, Linux included).
     if sed -n '/^# ### BEGIN LIBTOOL\( TAG\)* CONFIG/,/^# ### END LIBTOOL\( TAG\)* CONFIG/p' "$lt" \
             | grep -nE 'llvm-[0-9]|target-bin|linux-gnu|pc-linux'; then
         fail "libtool's configuration still names the build host"
     fi
-    grep -qE '^CC="?cc"?$' "$lt" || fail "libtool's C compiler is not cc"
+    # (autoconf 2.72+ configure adds the newest C standard the compiler
+    # takes, here -std=gnu23, as it does natively with clang 19.)
+    grep -E '^LTCC="cc( -std=gnu[0-9]+)?"$' "$lt" >/dev/null || fail "libtool's C compiler is not cc"
     [ -e "$COMP_ROOT/usr/lib/libltdl.so" ] && fail "libltdl was installed"
     script_check "$COMP_ROOT"
     no_build_paths "$COMP_ROOT"
