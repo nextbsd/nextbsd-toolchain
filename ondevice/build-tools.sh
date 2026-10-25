@@ -435,7 +435,7 @@ build_m4() {
 # the values it can't probe for FreeBSD are in perl/freebsd.hints). No threads,
 # and only the extensions autoconf and automake load, linked statically into
 # the one perl binary:
-#   XS:     Fcntl, POSIX, Errno, File::Glob, Tie::Hash::NamedCapture, IO,
+#   XS:     Fcntl, POSIX, Errno, File::Glob, Tie::Hash::NamedCapture, attributes, IO,
 #           Cwd/File::Spec (PathTools), Data::Dumper, Time::HiRes,
 #           List::Util/Scalar::Util
 #   pure:   constant, Exporter, Carp, XSLoader, base, parent, File::Find,
@@ -452,7 +452,7 @@ build_m4() {
 # they load is all here.
 # =============================================================================
 PERL_MODS=ext/Fcntl,ext/POSIX,ext/Errno,ext/File-Glob,ext/File-Find
-PERL_MODS+=,ext/Tie-Hash-NamedCapture
+PERL_MODS+=,ext/Tie-Hash-NamedCapture,ext/attributes
 PERL_MODS+=,dist/IO,dist/PathTools,dist/Data-Dumper,dist/Time-HiRes,dist/constant
 PERL_MODS+=,dist/Exporter,dist/Carp,dist/XSLoader,dist/base
 PERL_MODS+=,cpan/Scalar-List-Utils,cpan/parent,cpan/File-Temp,cpan/File-Path

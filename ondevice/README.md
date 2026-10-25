@@ -90,7 +90,7 @@ script a native configure on NextBSD would write.
 - **Build:** perl-cross 1.6.5 replaces Perl's `Configure` with one that only compiles and links its probes, so it
   runs with the cross compiler; `perl/freebsd.hints` gives it the values it can't probe (perl-cross has no FreeBSD
   hints). It builds without threads, and only the extensions autoconf and automake load are built, statically
-  into the one binary: Fcntl, POSIX, Errno, File::Glob, Tie::Hash::NamedCapture, IO, PathTools (Cwd,
+  into the one binary: Fcntl, POSIX, Errno, File::Glob, Tie::Hash::NamedCapture, attributes, IO, PathTools (Cwd,
   File::Spec), Data::Dumper, Time::HiRes and Scalar-List-Utils (XS), plus constant, Exporter, Carp, XSLoader,
   base, parent, File::Find, File::Temp, File::Path, Getopt::Long and Text::ParseWords. Perl's own `lib/`
   (strict, warnings, Config, File::Basename, File::Copy, Class::Struct, ...) comes with it.
