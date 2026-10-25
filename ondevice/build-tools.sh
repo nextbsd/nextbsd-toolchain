@@ -498,10 +498,13 @@ build_perl() {
         make $JOBS perl nonxs_ext utilities extensions
         # perl-cross makes a static extension with MakeMaker's "static"
         # target, which builds the archive but doesn't copy the module's .pm
-        # files into lib/ (pm_to_blib), so installperl wouldn't install them.
+        # files into lib/, and then touches the pm_to_blib stamp; so
+        # installperl wouldn't install POSIX.pm, Data/Dumper.pm, ... . Remove
+        # the stamp and run MakeMaker's pm_to_blib for each.
         local d
         for d in $(echo "$PERL_MODS" | tr , ' '); do
             if ls "$d" | grep -E '\.(xs|c)$' >/dev/null; then
+                rm -f "$d/pm_to_blib"
                 make -C "$d" PERL_CORE=1 LIBPERL=libperl.a LINKTYPE=static pm_to_blib
             fi
         done
