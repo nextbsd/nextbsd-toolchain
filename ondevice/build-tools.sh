@@ -371,11 +371,13 @@ no_build_paths() {
     note "no build paths under ${d:-/}"
 }
 
-# script_check <dir>: every script's #! line names /bin/sh, /usr/bin/env sh or
-# the private Perl, and the private Perl is staged.
+# script_check <dir> [<path to skip>...]: every script's #! line names /bin/sh,
+# /usr/bin/env sh or the private Perl.
 script_check() {
-    local f l bad=
+    local dir="$1" f l x bad=
+    shift
     while IFS= read -r f; do
+        for x in "$@"; do [ "${f#"$dir"}" = "$x" ] && continue 2; done
         l=$(head -n1 "$f")
         case "$l" in
             '#!'*) ;;
@@ -386,12 +388,9 @@ script_check() {
             "#!$AT_PERL"|"#! $AT_PERL"|"#!$AT_PERL "*|"#! $AT_PERL "*) ;;
             *) echo "unexpected interpreter: $f: $l" >&2; bad=1 ;;
         esac
-    done < <(find "$1" -type f -perm -u+x)
+    done < <(find "$dir" -type f -perm -u+x)
     [ -z "$bad" ] || fail "scripts with an interpreter NextBSD-toolchain does not ship"
-    if grep -rlaE "^#! ?$AT_PERL" "$1" >/dev/null; then
-        [ -x "$DESTDIR$AT_PERL" ] || note "(the private perl is staged by the perl component)"
-    fi
-    note "#! lines ok in $(basename "$1")"
+    note "#! lines ok in $(basename "$dir")"
 }
 
 # stage <comp-root>: copy one component's install into $DESTDIR.
@@ -467,11 +466,15 @@ build_perl() {
     local osvers=15.1
     # byteorder: perl-cross reads it from a test object with objdump, which the
     # image lacks for target objects; amd64 and arm64 are both 64-bit
-    # little-endian.
+    # little-endian. --sysroot (also inside the wrappers): the build's miniperl
+    # runs with $^O = linux, so Errno_pm.PL reads $Config{sysroot}/usr/include/
+    # errno.h, which must be NextBSD's. -fwrapv -fno-strict-aliasing: what
+    # Perl's own Configure adds for gcc and clang (perl-cross adds it for gcc
+    # only).
     (
         cd "$SRCDIR"
         ./configure \
-            --target="$CROSS_TRIPLE" \
+            --target="$CROSS_TRIPLE" --sysroot="$SYSROOT" \
             --with-cc="$TB/cc" --with-cpp="$TB/cpp" --with-ar="$TB/ar" \
             --with-nm="$TB/nm" --with-ranlib="$TB/ranlib" \
             --with-readelf="$TB/readelf" --with-objdump=objdump \
@@ -481,7 +484,7 @@ build_perl() {
             -Dman1dir=none -Dman3dir=none \
             -Dcf_by=NextBSD -Dcf_email=root@localhost -Dperladmin=root@localhost \
             -Dmyhostname=localhost -Dmydomain=.localdomain \
-            -Doptimize="-O2 -pipe" \
+            -Doptimize="-O2 -pipe -fwrapv -fno-strict-aliasing" \
             --all-static --only-mod="$PERL_MODS"
         make $JOBS
         make DESTDIR="$COMP_ROOT" install.perl
@@ -503,18 +506,22 @@ build_perl() {
     find "$r" -type d -empty -delete
 
     # Config records the tools as configured; they were the target-named
-    # wrappers, so drop the wrapper directory to leave cc, ar, nm, ... .
+    # wrappers, so drop the wrapper directory to leave cc, ar, nm, ... . The
+    # --sysroot flags and value are the build's, not the machine's.
     for f in "$COMP_ROOT$arch"/Config*.p[lm]; do
-        sed -i -e "s|$TB/||g" "$f"
+        sed -i -e "s|$TB/||g" -e "s| *--sysroot=$SYSROOT||g" \
+            -e "s|^sysroot='$SYSROOT'|sysroot=''|" -e "s|sysroot => '$SYSROOT'|sysroot => ''|" "$f"
     done
+    grep -n "$SYSROOT" "$COMP_ROOT$arch"/Config*.p[lm] || true
     no_build_paths "$r"
 
     stage "$COMP_ROOT"
     local p="$DESTDIR$AT_PERL"
     elf_check "$p"
     "$READELF" -d "$p" | grep NEEDED | sed 's/^/    /'
-    "$READELF" -d "$p" | grep NEEDED | grep -v 'lib\(c\|m\|crypt\|util\|thr\|gcc_s\)\.so' \
-        >/dev/null && fail "perl links something besides libc, libm, libcrypt, libutil"
+    # Base libraries only (librt: Time::HiRes's build asks for it).
+    "$READELF" -d "$p" | grep NEEDED | grep -v 'lib\(c\|m\|crypt\|util\|thr\|rt\|execinfo\|gcc_s\)\.so' \
+        >/dev/null && fail "perl links a library besides libc, libm, libcrypt, libutil, librt"
     strings -a "$p" | grep -F "$priv" >/dev/null || fail "perl's @INC does not have $priv"
     grep -q "^osname='freebsd'" "$DESTDIR$arch/Config_heavy.pl" || fail "perl's osname is not freebsd"
     grep -q "^useithreads='undef'" "$DESTDIR$arch/Config_heavy.pl" || fail "perl was built with threads"
@@ -763,7 +770,9 @@ EOF
     [ -f "$COMP_ROOT/usr/share/cmake-$mm/Modules/CMakeDetermineCCompiler.cmake" ] \
         || fail "CMake's modules are not in /usr/share/cmake-$mm"
     strings -a "$b/cmake" | grep -F "/share/cmake-$mm" >/dev/null || fail "cmake does not look in /usr/share/cmake-$mm"
-    script_check "$COMP_ROOT"
+    # The one bash script is the preprocessor wrapper for IBM's XL Fortran
+    # compiler (AIX and Linux only), which CMake runs only with that compiler.
+    script_check "$COMP_ROOT" "/usr/share/cmake-$mm/Modules/Compiler/XL-Fortran/cpp"
     no_build_paths "$COMP_ROOT"
     stage "$COMP_ROOT"
     note "cmake: $(du -sh --apparent-size "$COMP_ROOT" | cut -f1) ($(find "$COMP_ROOT" -type f | wc -l) files)"
