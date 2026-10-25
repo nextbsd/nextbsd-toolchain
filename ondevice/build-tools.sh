@@ -316,7 +316,8 @@ AT_PERL=$AT_PREFIX/bin/perl
 
 # target_tools: $TB holds the cross compiler and binutils under the names they
 # have on NextBSD (cc, c++, cpp, ld, nm, ar, ...), with the sysroot inside the
-# wrappers. perl-cross and libtool record the tools they were configured with
+# wrappers (the image has no llvm-objdump; nothing here runs objdump on target
+# objects). perl-cross and libtool record the tools they were configured with
 # (in Config.pm and in the libtool script), so configuring them with these
 # names records what is right on the machine. The linker is passed only when a
 # wrapper links, so compile-only probes see no "argument unused" warning;
@@ -341,7 +342,7 @@ EOF
     done
     printf '#!/bin/sh\nexec %s/clang %s -E "$@"\n' "$CROSS_BINDIR" "$common" > "$TB/cpp"
     printf '#!/bin/sh\nexec %s/ld.lld "$@"\n' "$CROSS_BINDIR" > "$TB/ld"
-    for t in ar nm ranlib strip objdump objcopy readelf; do
+    for t in ar nm ranlib strip objcopy readelf; do
         printf '#!/bin/sh\nexec %s/llvm-%s "$@"\n' "$CROSS_BINDIR" "$t" > "$TB/$t"
     done
     chmod 0755 "$TB"/*
@@ -357,7 +358,7 @@ host_autotools_paths() {
     [ -e "$AT_PERL" ] || { mkdir -p "$(dirname "$AT_PERL")"; ln -s "$(command -v perl)" "$AT_PERL"; }
     [ -e /usr/bin/gm4 ] || ln -s "$(command -v m4)" /usr/bin/gm4
     "$AT_PERL" -e 'require 5.010' || fail "no build-host perl for $AT_PERL"
-    /usr/bin/gm4 --version | grep -q 'GNU M4' || fail "no build-host GNU m4 for /usr/bin/gm4"
+    /usr/bin/gm4 --version | grep 'GNU M4' >/dev/null || fail "no build-host GNU m4 for /usr/bin/gm4"
 }
 
 # no_build_paths <dir>: nothing staged may name the build tree, the sysroot,
@@ -366,7 +367,8 @@ no_build_paths() {
     local hits
     hits=$(grep -rlaF -e "$BUILD" -e "$SYSROOT" -e "$CROSS_BINDIR" -e "${GITHUB_WORKSPACE:-/nonexistent-workspace}" "$1" || true)
     [ -z "$hits" ] || fail "build paths in: $hits"
-    note "no build paths under ${1#"$COMP_ROOT"}"
+    local d="${1#"$COMP_ROOT"}"; d="${d#"$DESTDIR"}"
+    note "no build paths under ${d:-/}"
 }
 
 # script_check <dir>: every script's #! line names /bin/sh, /usr/bin/env sh or
@@ -389,7 +391,7 @@ script_check() {
     if grep -rlaE "^#! ?$AT_PERL" "$1" >/dev/null; then
         [ -x "$DESTDIR$AT_PERL" ] || note "(the private perl is staged by the perl component)"
     fi
-    note "#! lines ok under ${1#"$COMP_ROOT"}"
+    note "#! lines ok in $(basename "$1")"
 }
 
 # stage <comp-root>: copy one component's install into $DESTDIR.
@@ -463,15 +465,18 @@ build_perl() {
     target_tools
     fresh_build perl
     local osvers=15.1
+    # byteorder: perl-cross reads it from a test object with objdump, which the
+    # image lacks for target objects; amd64 and arm64 are both 64-bit
+    # little-endian.
     (
         cd "$SRCDIR"
         ./configure \
             --target="$CROSS_TRIPLE" \
             --with-cc="$TB/cc" --with-cpp="$TB/cpp" --with-ar="$TB/ar" \
             --with-nm="$TB/nm" --with-ranlib="$TB/ranlib" \
-            --with-readelf="$TB/readelf" --with-objdump="$TB/objdump" \
+            --with-readelf="$TB/readelf" --with-objdump=objdump \
             --prefix="$AT_PREFIX" \
-            -Dosname=freebsd -Dosvers="$osvers" \
+            -Dosname=freebsd -Dosvers="$osvers" -Dbyteorder=12345678 \
             -Uusethreads -Uuseithreads -Uinstallusrbinperl \
             -Dman1dir=none -Dman3dir=none \
             -Dcf_by=NextBSD -Dcf_email=root@localhost -Dperladmin=root@localhost \
@@ -508,16 +513,16 @@ build_perl() {
     local p="$DESTDIR$AT_PERL"
     elf_check "$p"
     "$READELF" -d "$p" | grep NEEDED | sed 's/^/    /'
-    "$READELF" -d "$p" | grep NEEDED | grep -qv 'lib\(c\|m\|crypt\|util\|thr\|gcc_s\)\.so' \
-        && fail "perl links something besides libc, libm, libcrypt, libutil"
-    strings -a "$p" | grep -qF "$priv" || fail "perl's @INC does not have $priv"
+    "$READELF" -d "$p" | grep NEEDED | grep -v 'lib\(c\|m\|crypt\|util\|thr\|gcc_s\)\.so' \
+        >/dev/null && fail "perl links something besides libc, libm, libcrypt, libutil"
+    strings -a "$p" | grep -F "$priv" >/dev/null || fail "perl's @INC does not have $priv"
     grep -q "^osname='freebsd'" "$DESTDIR$arch/Config_heavy.pl" || fail "perl's osname is not freebsd"
     grep -q "^useithreads='undef'" "$DESTDIR$arch/Config_heavy.pl" || fail "perl was built with threads"
     for f in strict warnings Carp Exporter File/Temp Getopt/Long Data/Dumper POSIX Fcntl \
              Time/HiRes Cwd File/Spec IO/File Text/ParseWords Class/Struct; do
         [ -e "$DESTDIR$priv/$f.pm" ] || [ -e "$DESTDIR$arch/$f.pm" ] || fail "perl lacks $f.pm"
     done
-    if [ -d "$DESTDIR$arch/auto" ] && find "$DESTDIR$arch/auto" -name '*.so' | grep -q .; then
+    if [ -d "$DESTDIR$arch/auto" ] && find "$DESTDIR$arch/auto" -name '*.so' | grep . >/dev/null; then
         fail "perl staged loadable extensions; they should all be static"
     fi
     PERL_PRIVLIB=$priv PERL_ARCHLIB=$arch
@@ -539,8 +544,7 @@ build_autoconf() {
         CONFIG_SHELL=/bin/sh PERL="$AT_PERL" M4=/usr/bin/gm4 AWK=awk \
         SED=/usr/bin/sed GREP=/usr/bin/grep EGREP='/usr/bin/grep -E' \
         /bin/sh "$SRCDIR/configure" \
-            --prefix=/usr --mandir=/usr/share/man --infodir=/usr/share/info \
-            --with-lispdir=no
+            --prefix=/usr --mandir=/usr/share/man --infodir=/usr/share/info
         make $JOBS
         make install DESTDIR="$COMP_ROOT"
     )
@@ -758,7 +762,7 @@ EOF
     "$READELF" -d "$b/cmake" | grep NEEDED | sed 's/^/    /'
     [ -f "$COMP_ROOT/usr/share/cmake-$mm/Modules/CMakeDetermineCCompiler.cmake" ] \
         || fail "CMake's modules are not in /usr/share/cmake-$mm"
-    strings -a "$b/cmake" | grep -qF "/share/cmake-$mm" || fail "cmake does not look in /usr/share/cmake-$mm"
+    strings -a "$b/cmake" | grep -F "/share/cmake-$mm" >/dev/null || fail "cmake does not look in /usr/share/cmake-$mm"
     script_check "$COMP_ROOT"
     no_build_paths "$COMP_ROOT"
     stage "$COMP_ROOT"
