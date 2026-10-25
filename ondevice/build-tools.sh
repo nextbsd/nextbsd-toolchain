@@ -496,6 +496,15 @@ build_perl() {
         make miniperl
         make dynaloader
         make $JOBS perl nonxs_ext utilities extensions
+        # perl-cross makes a static extension with MakeMaker's "static"
+        # target, which builds the archive but doesn't copy the module's .pm
+        # files into lib/ (pm_to_blib), so installperl wouldn't install them.
+        local d
+        for d in $(echo "$PERL_MODS" | tr , ' '); do
+            if ls "$d" | grep -E '\.(xs|c)$' >/dev/null; then
+                make -C "$d" PERL_CORE=1 LIBPERL=libperl.a LINKTYPE=static pm_to_blib
+            fi
+        done
         make DESTDIR="$COMP_ROOT" INSTALLFLAGS=-p install.perl
     )
 
@@ -511,7 +520,9 @@ build_perl() {
     [ -f "$r/bin/perl" ] && [ ! -L "$r/bin/perl" ] || fail "perl is not a file in $AT_PREFIX/bin"
     "$STRIP" "$r/bin/perl"
     rm -rf "$r/share" "$r/man" "$COMP_ROOT$arch/CORE" "$COMP_ROOT$priv/pod" "$COMP_ROOT$priv/unicore"
-    find "$r" \( -name '*.pod' -o -name .packlist -o -name '*.h' \) -exec rm -f {} +
+    # auto/: the static extensions' archives (for linking a new perl).
+    find "$r" \( -name '*.pod' -o -name .packlist -o -name '*.h' -o -name '*.a' \
+                -o -name 'extralibs.*' \) -exec rm -f {} +
     find "$r" -type d -empty -delete
 
     # Config records the tools as configured; they were the target-named
