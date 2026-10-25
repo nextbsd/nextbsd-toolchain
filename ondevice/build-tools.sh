@@ -489,8 +489,14 @@ build_perl() {
             -Dmyhostname=localhost -Dmydomain=.localdomain \
             -Doptimize="-O2 -pipe -fwrapv -fno-strict-aliasing" \
             --all-static --only-mod="$PERL_MODS"
-        make $JOBS
-        make DESTDIR="$COMP_ROOT" install.perl
+        # perl-cross's "all" in its steps, less "pods" (perltoc and the other
+        # generated pods aren't shipped, and their tools need modules not built
+        # here); installperl -p doesn't install the pods.
+        make crosspatch
+        make miniperl
+        make dynaloader
+        make $JOBS perl nonxs_ext utilities extensions
+        make DESTDIR="$COMP_ROOT" INSTALLFLAGS=-p install.perl
     )
 
     local r="$COMP_ROOT$AT_PREFIX" priv arch f
