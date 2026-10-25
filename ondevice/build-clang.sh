@@ -31,7 +31,7 @@
 # the other, like the image's compiler. Release, no assertions, stripped.
 #
 # EXECUTION CONTEXT
-#   Inside the nextbsd-kernel-toolchain container ($CROSS_BINDIR holds the
+#   Inside the nextbsd-toolchain container ($CROSS_BINDIR holds the
 #   pinned clang/lld), with compat's `continuous` base extracted in $SYSROOT.
 #
 # USAGE

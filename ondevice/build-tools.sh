@@ -18,7 +18,7 @@
 # NextBSD (perl-cross has none for FreeBSD).
 #
 # EXECUTION CONTEXT
-#   Inside the nextbsd-kernel-toolchain container, with compat's `continuous`
+#   Inside the nextbsd-toolchain container, with compat's `continuous`
 #   base and nextbsd-userland's `continuous` tree (for libcurl, which Git's
 #   http/https transport links) extracted together in $SYSROOT.
 #

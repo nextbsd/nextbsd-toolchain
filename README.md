@@ -4,9 +4,10 @@ Cross-compilation toolchain containers for NextBSD's build pipeline (kernel, kex
 
 > **Renamed** from `nextbsd-kernel-toolchain` (2026-10-24). The repo serves every NextBSD build, not only the kernel,
 > and will build the pinned LLVM 19.1.7 toolchain itself (nextbsd/nextbsd#561, E23).
-> **The container image keeps its old name for now:** `ghcr.io/nextbsd/nextbsd-kernel-toolchain`. Moving it to
-> `ghcr.io/nextbsd/nextbsd-toolchain` is a separate, staged change. Never create a new repo named
-> `nextbsd-kernel-toolchain`: that would break the redirect from the old name.
+> **The container image is `ghcr.io/nextbsd/nextbsd-toolchain`.** During the staged move (#15) it is also still
+> pushed under the old name, `ghcr.io/nextbsd/nextbsd-kernel-toolchain`, with the same tags; that stops once no
+> consumer pulls the old name. Never create a new repo named `nextbsd-kernel-toolchain`: that would break the
+> redirect from the old name.
 
 Each image bakes a **shallow, full-tree** checkout of
 [`nextbsd/freebsd-src`](https://github.com/nextbsd/freebsd-src)
@@ -62,5 +63,5 @@ On success the **amd64** leg dispatches `toolchain-updated` to
 
 After the first successful build, set the GHCR package visibility to **public**
 so downstream `container:` jobs can pull it without credentials
-(Org → Packages → `nextbsd-kernel-toolchain` → Package settings → Change
+(Org → Packages → `nextbsd-toolchain` → Package settings → Change
 visibility → Public).

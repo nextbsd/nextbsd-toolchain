@@ -41,7 +41,7 @@ jobs:
       matrix:
         arch: [amd64, arm64]
     container:
-      image: ghcr.io/nextbsd/nextbsd-kernel-toolchain:${{ matrix.arch }}-latest
+      image: ghcr.io/nextbsd/nextbsd-toolchain:${{ matrix.arch }}-latest
     steps:
       - uses: actions/checkout@v4
 

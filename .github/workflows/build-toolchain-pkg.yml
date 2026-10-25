@@ -53,7 +53,7 @@ jobs:
           - { arch: amd64, target_arch: amd64 }
           - { arch: arm64, target_arch: aarch64 }
     container:
-      image: ghcr.io/nextbsd/nextbsd-kernel-toolchain:${{ matrix.arch }}-latest
+      image: ghcr.io/nextbsd/nextbsd-toolchain:${{ matrix.arch }}-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -111,7 +111,7 @@ jobs:
           - { set: autotools, components: 'm4 perl autoconf automake libtool', label: 'm4, perl, autoconf, automake, libtool' }
           - { set: cmake, components: 'cmake', label: 'cmake' }
     container:
-      image: ghcr.io/nextbsd/nextbsd-kernel-toolchain:${{ matrix.arch }}-latest
+      image: ghcr.io/nextbsd/nextbsd-toolchain:${{ matrix.arch }}-latest
     steps:
       - uses: actions/checkout@v4
 
