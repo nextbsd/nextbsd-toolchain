@@ -183,7 +183,7 @@ jobs:
             echo "| Installed size | $(du -sh --apparent-size stage | cut -f1) |"
             echo "| Tarball | $(du -h --apparent-size "$out" | cut -f1) |"
             echo "| Files / links | $(find stage -type f | wc -l) / $(find stage -type l | wc -l) |"
-            echo "| clang + lld + binutils | $(du -sh --apparent-size stage/usr/bin | cut -f1) in /usr/bin |"
+            echo "| /usr/bin (clang, lld, binutils, cmake, ...) | $(du -sh --apparent-size stage/usr/bin | cut -f1) |"
             echo "| git (bin + libexec + share) | $(du -csh --apparent-size stage/usr/bin/git stage/usr/libexec/git-core stage/usr/share/git-core | tail -1 | cut -f1) |"
             echo "| cmake (bin + share/cmake-*) | $(du -csh --apparent-size stage/usr/bin/cmake stage/usr/bin/ctest stage/usr/bin/cpack stage/usr/share/cmake-* | tail -1 | cut -f1) |"
             echo "| autotools' private Perl (/usr/libexec/autotools) | $(du -sh --apparent-size stage/usr/libexec/autotools | cut -f1) |"

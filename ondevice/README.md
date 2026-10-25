@@ -20,7 +20,7 @@ compiler is).
 | GNU m4 | 1.4.21 | `/usr/bin/gm4` (base's `/usr/bin/m4` is BSD m4) |
 | GNU Autoconf | 2.73 | `/usr/bin/autoconf`, `autoheader`, `autom4te`, `autoreconf`, `autoscan`, `autoupdate`, `ifnames`; `/usr/share/autoconf` |
 | GNU Automake | 1.19 | `/usr/bin/automake`, `aclocal` (+ `-1.19` names); `/usr/share/automake-1.19`, `/usr/share/aclocal-1.19` |
-| GNU Libtool | 2.6.2 | `/usr/bin/libtool`, `libtoolize`; `/usr/share/libtool`, its macros in `/usr/share/aclocal` (no libltdl) |
+| GNU Libtool | 2.6.2 | `/usr/bin/libtool`, `libtoolize`, `libtool-next-version`; `/usr/share/libtool`, its macros in `/usr/share/aclocal` (no libltdl) |
 | Perl, for autoconf/automake only | 5.44.0 (perl-cross 1.6.5) | `/usr/libexec/autotools/bin/perl`, `/usr/libexec/autotools/lib/perl5` (private, not on `PATH`) |
 
 Base already has what a native build needs besides these: headers, libc++/libcxxrt, the `crt*.o` files and
@@ -40,9 +40,10 @@ the way nextbsd-contrib builds:
   (scripts only) configured with the paths they have on NextBSD. The workflow runs it as three sets per arch side
   by side: `gmake pkgconf git`, `m4 perl autoconf automake libtool` and `cmake`.
 
-Every component's checks: target executables are NextBSD ELFs for the right machine and link what they should;
-nothing staged names the build tree, the sysroot or the runner's LLVM; every script's `#!` names `/bin/sh` or the
-private Perl; and nothing staged replaces a file base already has.
+Checks: target executables are NextBSD ELFs for the right machine and link what they should. For cmake, m4,
+Perl and the autotools, also: nothing staged names the build tree, the sysroot or the runner's LLVM, and every
+script's `#!` names `/bin/sh` (or `/usr/bin/env sh`) or the private Perl. For the whole tools tree: nothing
+staged replaces a file the sysroot (base, plus nextbsd-userland) already has.
 
 The result is `nextbsd-toolchain-<arch>.tar.gz`, a tree rooted at `/` owned by root. A merge to `main` or a
 manual run on `main` publishes it to this repo's `continuous` release; nothing is dispatched downstream. PRs
