@@ -4,9 +4,8 @@ Cross-compilation toolchain containers for NextBSD's build pipeline (kernel, kex
 
 > **Renamed** from `nextbsd-kernel-toolchain` (2026-10-24). The repo serves every NextBSD build, not only the kernel,
 > and will build the pinned LLVM 19.1.7 toolchain itself (nextbsd/nextbsd#561, E23).
-> **The container image is `ghcr.io/nextbsd/nextbsd-toolchain`.** During the staged move (#15) it is also still
-> pushed under the old name, `ghcr.io/nextbsd/nextbsd-kernel-toolchain`, with the same tags; that stops once no
-> consumer pulls the old name. Never create a new repo named `nextbsd-kernel-toolchain`: that would break the
+> **The container image is `ghcr.io/nextbsd/nextbsd-toolchain`.** The old
+> `ghcr.io/nextbsd/nextbsd-kernel-toolchain` package keeps its last images but gets no new ones (#15). Never create a new repo named `nextbsd-kernel-toolchain`: that would break the
 > redirect from the old name.
 
 Each image bakes a **shallow, full-tree** checkout of

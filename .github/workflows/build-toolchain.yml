@@ -17,11 +17,10 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  # The image is moving to the repo's name (#15). Stage 1: every image is
-  # pushed under both names; consumers still pull IMAGE until stage 2 switches
-  # them to IMAGE_NEW, then IMAGE stops being pushed.
-  IMAGE: ghcr.io/nextbsd/nextbsd-kernel-toolchain
-  IMAGE_NEW: ghcr.io/nextbsd/nextbsd-toolchain
+  # Pushed only under the repo's name since #15. The old
+  # ghcr.io/nextbsd/nextbsd-kernel-toolchain package keeps its last images but
+  # gets no new ones.
+  IMAGE: ghcr.io/nextbsd/nextbsd-toolchain
   FREEBSD_BRANCH: releng/15.1
 
 jobs:
@@ -142,13 +141,11 @@ jobs:
           # never touch production; only main publishes :latest + :fbsd-<sha>.
           {
             echo "tags<<EOF"
-            for img in "${{ env.IMAGE }}" "${{ env.IMAGE_NEW }}"; do
-              echo "${img}:${{ matrix.target }}-${BRANCH}"
-              if [ "$BRANCH" = "main" ]; then
-                echo "${img}:${{ matrix.target }}-latest"
-                echo "${img}:${{ matrix.target }}-fbsd-${SHA:-tip}"
-              fi
-            done
+            echo "${{ env.IMAGE }}:${{ matrix.target }}-${BRANCH}"
+            if [ "$BRANCH" = "main" ]; then
+              echo "${{ env.IMAGE }}:${{ matrix.target }}-latest"
+              echo "${{ env.IMAGE }}:${{ matrix.target }}-fbsd-${SHA:-tip}"
+            fi
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
