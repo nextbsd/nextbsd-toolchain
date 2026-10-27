@@ -13,7 +13,10 @@ on:
       - 'mesa-clc/**'
       - '.github/workflows/build-toolchain.yml'
   schedule:
-    - cron: '0 6 * * 1'  # weekly fallback
+    # Weekly, to keep the LLVM build cache warm (an idle week otherwise means
+    # a ~1 h LLVM rebuild). It refreshes the images but never starts the chain:
+    # see the notify job.
+    - cron: '0 6 * * 1'
 
 env:
   REGISTRY: ghcr.io
@@ -189,13 +192,17 @@ jobs:
   # failed, both publishes skipped). A `needs: build` job waits for ALL matrix
   # legs (fail-fast: false, so a failed leg still fails `build` and correctly
   # blocks the cascade rather than dispatching against a missing tag) and fans
-  # out only then. Same firing conditions as before (main, non-PR), so a
-  # branch/PR build still never cascades.
+  # out only then. A branch/PR build never cascades.
+  #
+  # Nor does the weekly schedule (nextbsd-kernel#324): the chain runs only on
+  # an upstream change (freebsd-src's daily sync sends upstream-updated) or a
+  # manual full-chain run (freebsd-src's Sync Fork with `force`, or a manual
+  # run of this workflow).
   notify:
     name: notify downstream (both toolchain images pushed)
     runs-on: ubuntu-24.04
     needs: build
-    if: github.ref_name == 'main' && github.event_name != 'pull_request'
+    if: github.ref_name == 'main' && github.event_name != 'pull_request' && github.event_name != 'schedule'
     steps:
       # nextbsd-kernel reads client_payload.fbsd_sha to pin its toolchain
       # image tag; the PAT stays only on this step.

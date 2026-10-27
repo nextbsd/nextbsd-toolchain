@@ -53,10 +53,13 @@ the image. See [`llvm-static/README.md`](llvm-static/README.md).
 - `repository_dispatch: upstream-updated` — from the `freebsd-src` fork's daily
   sync, carrying the exact changed SHA in `client_payload[sha]`.
 - `workflow_dispatch` — manual.
-- `schedule` — weekly fallback (Mondays 06:00 UTC).
+- `schedule` — weekly (Mondays 06:00 UTC), to keep the LLVM build cache warm.
+  It refreshes the images but does **not** start the chain.
 
-On success the **amd64** leg dispatches `toolchain-updated` to
-`nextbsd-kernel`, passing the pinned `image_tag` forward.
+When both arches have pushed, the `notify` job dispatches `toolchain-updated`
+to `nextbsd-kernel` and `nextbsd-freebsd-compat`, passing the pinned SHA
+forward. It runs for `upstream-updated` and manual runs on `main`, never for
+PRs or the weekly schedule (nextbsd-kernel#324).
 
 ## One-time setup
 
